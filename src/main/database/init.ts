@@ -1,31 +1,113 @@
-import Database from 'better-sqlite3';
+import initSqlJs, { Database as SqlJsDatabase } from 'sql.js';
 import path from 'path';
 import { app } from 'electron';
 import fs from 'fs';
 
-let db: Database.Database | null = null;
+let db: SqlJsDatabase | null = null;
+let dbPath: string = '';
 
-export function getDatabase(): Database.Database {
+// Wrapper to provide better-sqlite3-like interface
+export interface DatabaseWrapper {
+  prepare(sql: string): StatementWrapper;
+  exec(sql: string): void;
+  close(): void;
+}
+
+interface StatementWrapper {
+  run(...params: unknown[]): void;
+  get(...params: unknown[]): unknown;
+  all(...params: unknown[]): unknown[];
+}
+
+function createStatementWrapper(database: SqlJsDatabase, sql: string): StatementWrapper {
+  return {
+    run(...params: unknown[]) {
+      database.run(sql, params as (string | number | null | Uint8Array)[]);
+      saveDatabase();
+    },
+    get(...params: unknown[]) {
+      const stmt = database.prepare(sql);
+      stmt.bind(params as (string | number | null | Uint8Array)[]);
+      if (stmt.step()) {
+        const result = stmt.getAsObject();
+        stmt.free();
+        return result;
+      }
+      stmt.free();
+      return undefined;
+    },
+    all(...params: unknown[]) {
+      const results: unknown[] = [];
+      const stmt = database.prepare(sql);
+      stmt.bind(params as (string | number | null | Uint8Array)[]);
+      while (stmt.step()) {
+        results.push(stmt.getAsObject());
+      }
+      stmt.free();
+      return results;
+    },
+  };
+}
+
+function createDatabaseWrapper(database: SqlJsDatabase): DatabaseWrapper {
+  return {
+    prepare(sql: string) {
+      return createStatementWrapper(database, sql);
+    },
+    exec(sql: string) {
+      database.run(sql);
+      saveDatabase();
+    },
+    close() {
+      if (database) {
+        const data = database.export();
+        const buffer = Buffer.from(data);
+        fs.writeFileSync(dbPath, buffer);
+        database.close();
+      }
+    },
+  };
+}
+
+function saveDatabase(): void {
+  if (db && dbPath) {
+    const data = db.export();
+    const buffer = Buffer.from(data);
+    fs.writeFileSync(dbPath, buffer);
+  }
+}
+
+export function getDatabase(): DatabaseWrapper {
   if (!db) {
     throw new Error('Database not initialized');
   }
-  return db;
+  return createDatabaseWrapper(db);
 }
 
 export async function initializeDatabase(): Promise<void> {
-  const dbPath = path.join(app.getPath('userData'), 'specter.db');
+  dbPath = path.join(app.getPath('userData'), 'specter.db');
   const dbDir = path.dirname(dbPath);
 
   if (!fs.existsSync(dbDir)) {
     fs.mkdirSync(dbDir, { recursive: true });
   }
 
-  db = new Database(dbPath);
-  db.pragma('journal_mode = WAL');
-  db.pragma('foreign_keys = ON');
+  // Initialize SQL.js
+  const SQL = await initSqlJs();
+
+  // Load existing database or create new one
+  if (fs.existsSync(dbPath)) {
+    const fileBuffer = fs.readFileSync(dbPath);
+    db = new SQL.Database(fileBuffer);
+  } else {
+    db = new SQL.Database();
+  }
+
+  // Enable foreign keys
+  db.run('PRAGMA foreign_keys = ON');
 
   // Create tables
-  db.exec(`
+  db.run(`
     -- Vaults table
     CREATE TABLE IF NOT EXISTS vaults (
       id TEXT PRIMARY KEY,
@@ -236,135 +318,63 @@ export async function initializeDatabase(): Promise<void> {
       is_custom INTEGER DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
-
-    -- Create indexes
-    CREATE INDEX IF NOT EXISTS idx_targets_vault ON targets(vault_id);
-    CREATE INDEX IF NOT EXISTS idx_findings_target ON findings(target_id);
-    CREATE INDEX IF NOT EXISTS idx_findings_severity ON findings(severity);
-    CREATE INDEX IF NOT EXISTS idx_evidence_finding ON evidence(finding_id);
-    CREATE INDEX IF NOT EXISTS idx_logs_target ON command_logs(target_id);
-    CREATE INDEX IF NOT EXISTS idx_timeline_vault ON timeline_events(vault_id);
-    CREATE INDEX IF NOT EXISTS idx_credentials_vault ON credentials(vault_id);
-    CREATE INDEX IF NOT EXISTS idx_pocs_target ON pocs(target_id);
-    CREATE INDEX IF NOT EXISTS idx_attack_progress_target ON attack_path_progress(target_id);
+    )
   `);
 
-  // Insert default playbooks and knowledge base data
-  await seedKnowledgeBase(db);
+  // Create indexes
+  db.run(`CREATE INDEX IF NOT EXISTS idx_targets_vault ON targets(vault_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_findings_target ON findings(target_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_findings_severity ON findings(severity)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_evidence_finding ON evidence(finding_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_logs_target ON command_logs(target_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_timeline_vault ON timeline_events(vault_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_credentials_vault ON credentials(vault_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_pocs_target ON pocs(target_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_attack_progress_target ON attack_path_progress(target_id)`);
+
+  // Seed knowledge base
+  await seedKnowledgeBase();
+
+  // Save initial database
+  saveDatabase();
 }
 
-async function seedKnowledgeBase(database: Database.Database): Promise<void> {
+async function seedKnowledgeBase(): Promise<void> {
+  if (!db) return;
+
   // Check if already seeded
-  const count = database.prepare('SELECT COUNT(*) as count FROM kb_techniques').get() as { count: number };
-  if (count.count > 0) return;
+  const stmt = db.prepare('SELECT COUNT(*) as count FROM kb_techniques');
+  if (stmt.step()) {
+    const result = stmt.getAsObject() as { count: number };
+    if (result.count > 0) {
+      stmt.free();
+      return;
+    }
+  }
+  stmt.free();
 
   // Insert default attack techniques
   const techniques = [
-    {
-      id: 'web-auth-001',
-      technique_id: 'AUTH-BYPASS',
-      name: 'Authentication Bypass',
-      category: 'Web',
-      attack_path: 'auth',
-      description: 'Techniques to bypass authentication mechanisms',
-      prerequisites: 'Access to login endpoint',
-      steps: JSON.stringify([
-        'Identify authentication mechanism',
-        'Test for default credentials',
-        'Test for SQL injection in login',
-        'Test for authentication logic flaws',
-        'Check for JWT vulnerabilities',
-      ]),
-    },
-    {
-      id: 'web-idor-001',
-      technique_id: 'IDOR',
-      name: 'Insecure Direct Object Reference',
-      category: 'Web',
-      attack_path: 'access_control',
-      description: 'Access unauthorized resources by manipulating object references',
-      prerequisites: 'Authenticated session, identifiable object references',
-      steps: JSON.stringify([
-        'Identify object references in requests',
-        'Map access control patterns',
-        'Test horizontal privilege escalation',
-        'Test vertical privilege escalation',
-        'Document accessible resources',
-      ]),
-    },
-    {
-      id: 'web-sqli-001',
-      technique_id: 'SQLI',
-      name: 'SQL Injection',
-      category: 'Web',
-      attack_path: 'input',
-      description: 'Inject malicious SQL queries through user input',
-      prerequisites: 'Input field connected to database',
-      steps: JSON.stringify([
-        'Identify injection points',
-        'Test for error-based SQLi',
-        'Test for blind SQLi',
-        'Enumerate database structure',
-        'Extract sensitive data',
-      ]),
-    },
-    {
-      id: 'ad-enum-001',
-      technique_id: 'AD-ENUM',
-      name: 'Active Directory Enumeration',
-      category: 'ActiveDirectory',
-      attack_path: 'enumeration',
-      description: 'Enumerate AD environment for attack paths',
-      prerequisites: 'Network access to domain',
-      steps: JSON.stringify([
-        'Identify domain controllers',
-        'Enumerate users and groups',
-        'Map trust relationships',
-        'Identify service accounts',
-        'Find privileged accounts',
-      ]),
-    },
-    {
-      id: 'ad-kerb-001',
-      technique_id: 'KERBEROAST',
-      name: 'Kerberoasting',
-      category: 'ActiveDirectory',
-      attack_path: 'kerberos',
-      description: 'Request and crack service tickets for service accounts',
-      prerequisites: 'Valid domain credentials',
-      steps: JSON.stringify([
-        'Enumerate SPNs',
-        'Request service tickets',
-        'Export tickets',
-        'Crack tickets offline',
-        'Use obtained credentials',
-      ]),
-    },
+    ['web-auth-001', 'AUTH-BYPASS', 'Authentication Bypass', 'Web', 'auth', 'Techniques to bypass authentication mechanisms', 'Access to login endpoint', JSON.stringify(['Identify authentication mechanism', 'Test for default credentials', 'Test for SQL injection in login', 'Test for authentication logic flaws', 'Check for JWT vulnerabilities'])],
+    ['web-idor-001', 'IDOR', 'Insecure Direct Object Reference', 'Web', 'access_control', 'Access unauthorized resources by manipulating object references', 'Authenticated session, identifiable object references', JSON.stringify(['Identify object references in requests', 'Map access control patterns', 'Test horizontal privilege escalation', 'Test vertical privilege escalation', 'Document accessible resources'])],
+    ['web-sqli-001', 'SQLI', 'SQL Injection', 'Web', 'input', 'Inject malicious SQL queries through user input', 'Input field connected to database', JSON.stringify(['Identify injection points', 'Test for error-based SQLi', 'Test for blind SQLi', 'Enumerate database structure', 'Extract sensitive data'])],
+    ['ad-enum-001', 'AD-ENUM', 'Active Directory Enumeration', 'ActiveDirectory', 'enumeration', 'Enumerate AD environment for attack paths', 'Network access to domain', JSON.stringify(['Identify domain controllers', 'Enumerate users and groups', 'Map trust relationships', 'Identify service accounts', 'Find privileged accounts'])],
+    ['ad-kerb-001', 'KERBEROAST', 'Kerberoasting', 'ActiveDirectory', 'kerberos', 'Request and crack service tickets for service accounts', 'Valid domain credentials', JSON.stringify(['Enumerate SPNs', 'Request service tickets', 'Export tickets', 'Crack tickets offline', 'Use obtained credentials'])],
   ];
 
-  const insertTechnique = database.prepare(`
-    INSERT OR IGNORE INTO kb_techniques
-    (id, technique_id, name, category, attack_path, description, prerequisites, steps)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
   for (const tech of techniques) {
-    insertTechnique.run(
-      tech.id,
-      tech.technique_id,
-      tech.name,
-      tech.category,
-      tech.attack_path,
-      tech.description,
-      tech.prerequisites,
-      tech.steps
+    db.run(
+      `INSERT OR IGNORE INTO kb_techniques (id, technique_id, name, category, attack_path, description, prerequisites, steps) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      tech
     );
   }
 }
 
 export function closeDatabase(): void {
   if (db) {
+    const data = db.export();
+    const buffer = Buffer.from(data);
+    fs.writeFileSync(dbPath, buffer);
     db.close();
     db = null;
   }
