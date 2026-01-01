@@ -23,7 +23,7 @@
     "@xterm/xterm": "^5.3.0",
     "@xterm/addon-fit": "^0.8.0",
     "@xterm/addon-web-links": "^0.9.0",
-    "better-sqlite3": "^9.4.3",
+    "sql.js": "^1.10.2",
     "electron-store": "^8.1.0",
     "ssh2": "^1.15.0",
     "uuid": "^9.0.1",
@@ -32,7 +32,7 @@
     "crypto-js": "^4.2.0"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.9",
+    "@types/sql.js": "^1.4.9",
     "@types/crypto-js": "^4.2.2",
     "@types/node": "^20.11.19",
     "@types/react": "^18.2.56",

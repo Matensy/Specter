@@ -135,5 +135,4 @@ contextBridge.exposeInMainWorld('specter', {
   },
 });
 
-// Type declarations
-export type SpecterAPI = typeof window.specter;
+// Types are declared in src/renderer/types/specter.d.ts
