@@ -15,17 +15,52 @@ interface TerminalInstance {
 
 export default function TerminalPage() {
   const terminalContainerRef = useRef<HTMLDivElement>(null);
+  const terminalsRef = useRef<Map<string, TerminalInstance>>(new Map());
+  const listenersSetupRef = useRef(false);
   const { status: vmStatus, connect } = useVM();
   const { currentVault } = useVault();
-  const [terminals, setTerminals] = useState<TerminalInstance[]>([]);
+  const [terminalIds, setTerminalIds] = useState<string[]>([]);
   const [activeTerminal, setActiveTerminal] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Setup IPC listeners only once
+  useEffect(() => {
+    if (listenersSetupRef.current) return;
+    listenersSetupRef.current = true;
+
+    window.specter.terminal.onData((terminalId: string, data: string) => {
+      const term = terminalsRef.current.get(terminalId);
+      if (term) {
+        term.terminal.write(data);
+      }
+    });
+
+    window.specter.terminal.onExit((terminalId: string) => {
+      const term = terminalsRef.current.get(terminalId);
+      if (term) {
+        term.terminal.dispose();
+        terminalsRef.current.delete(terminalId);
+        setTerminalIds(prev => prev.filter(id => id !== terminalId));
+        setActiveTerminal(prev => prev === terminalId ? null : prev);
+      }
+    });
+  }, []);
 
   const createTerminal = useCallback(async () => {
-    if (!vmStatus.connected || !currentVault) return;
+    if (!vmStatus.connected) {
+      setError('VM not connected');
+      return;
+    }
 
-    const result = await window.specter.terminal.create(currentVault.id);
-    if (!result.success) {
+    setError(null);
+
+    // Use vault ID or 'global' for terminals without vault
+    const vaultId = currentVault?.id || 'global';
+
+    const result = await window.specter.terminal.create(vaultId);
+    if (!result.success || !result.terminalId) {
+      setError(result.error || 'Failed to create terminal');
       console.error('Failed to create terminal:', result.error);
       return;
     }
@@ -54,7 +89,7 @@ export default function TerminalPage() {
         brightCyan: '#22d3ee',
         brightWhite: '#ffffff',
       },
-      fontFamily: 'JetBrains Mono, monospace',
+      fontFamily: 'JetBrains Mono, Consolas, monospace',
       fontSize: 14,
       lineHeight: 1.2,
       cursorBlink: true,
@@ -68,49 +103,33 @@ export default function TerminalPage() {
     terminal.loadAddon(fitAddon);
     terminal.loadAddon(webLinksAddon);
 
-    const newTerminal: TerminalInstance = {
+    const terminalInstance: TerminalInstance = {
       id: result.terminalId,
-      name: `Terminal ${terminals.length + 1}`,
+      name: `Terminal ${terminalsRef.current.size + 1}`,
       terminal,
       fitAddon,
     };
 
     // Handle terminal input
     terminal.onData((data) => {
-      window.specter.terminal.write(result.terminalId, data);
+      window.specter.terminal.write(result.terminalId!, data);
     });
 
     // Handle terminal resize
     terminal.onResize(({ cols, rows }) => {
-      window.specter.terminal.resize(result.terminalId, cols, rows);
+      window.specter.terminal.resize(result.terminalId!, cols, rows);
     });
 
-    setTerminals((prev) => [...prev, newTerminal]);
+    terminalsRef.current.set(result.terminalId, terminalInstance);
+    setTerminalIds(prev => [...prev, result.terminalId!]);
     setActiveTerminal(result.terminalId);
-  }, [vmStatus.connected, currentVault, terminals.length]);
-
-  // Listen for terminal data
-  useEffect(() => {
-    window.specter.terminal.onData((terminalId: string, data: string) => {
-      const term = terminals.find((t) => t.id === terminalId);
-      if (term) {
-        term.terminal.write(data);
-      }
-    });
-
-    window.specter.terminal.onExit((terminalId: string) => {
-      setTerminals((prev) => prev.filter((t) => t.id !== terminalId));
-      if (activeTerminal === terminalId) {
-        setActiveTerminal(terminals[0]?.id || null);
-      }
-    });
-  }, [terminals, activeTerminal]);
+  }, [vmStatus.connected, currentVault?.id]);
 
   // Attach terminal to DOM when active changes
   useEffect(() => {
     if (!terminalContainerRef.current || !activeTerminal) return;
 
-    const term = terminals.find((t) => t.id === activeTerminal);
+    const term = terminalsRef.current.get(activeTerminal);
     if (!term) return;
 
     // Clear container
@@ -118,14 +137,20 @@ export default function TerminalPage() {
 
     // Open terminal
     term.terminal.open(terminalContainerRef.current);
-    term.fitAddon.fit();
 
-    // Focus terminal
-    term.terminal.focus();
+    // Delay fit to ensure container is rendered
+    setTimeout(() => {
+      term.fitAddon.fit();
+      term.terminal.focus();
+    }, 50);
 
     // Resize observer
     const resizeObserver = new ResizeObserver(() => {
-      term.fitAddon.fit();
+      try {
+        term.fitAddon.fit();
+      } catch (e) {
+        // Ignore resize errors
+      }
     });
 
     resizeObserver.observe(terminalContainerRef.current);
@@ -133,28 +158,48 @@ export default function TerminalPage() {
     return () => {
       resizeObserver.disconnect();
     };
-  }, [activeTerminal, terminals]);
+  }, [activeTerminal]);
 
-  const closeTerminal = (id: string) => {
+  const closeTerminal = useCallback((id: string) => {
     window.specter.terminal.close(id);
-    const term = terminals.find((t) => t.id === id);
+    const term = terminalsRef.current.get(id);
     if (term) {
       term.terminal.dispose();
+      terminalsRef.current.delete(id);
     }
-    setTerminals((prev) => prev.filter((t) => t.id !== id));
-    if (activeTerminal === id) {
-      setActiveTerminal(terminals.filter((t) => t.id !== id)[0]?.id || null);
-    }
-  };
+    setTerminalIds(prev => prev.filter(tid => tid !== id));
+    setActiveTerminal(prev => {
+      if (prev === id) {
+        const remaining = Array.from(terminalsRef.current.keys());
+        return remaining[0] || null;
+      }
+      return prev;
+    });
+  }, []);
 
   const handleConnect = async () => {
     setConnecting(true);
+    setError(null);
     try {
-      await connect();
+      const result = await connect();
+      if (!result.success) {
+        setError(result.error || 'Failed to connect');
+      }
+    } catch (e) {
+      setError((e as Error).message);
     } finally {
       setConnecting(false);
     }
   };
+
+  const getTerminalsList = () => {
+    return terminalIds.map(id => {
+      const term = terminalsRef.current.get(id);
+      return term ? { id: term.id, name: term.name } : null;
+    }).filter(Boolean) as { id: string; name: string }[];
+  };
+
+  const terminals = getTerminalsList();
 
   return (
     <div className="h-full flex flex-col">
@@ -191,7 +236,7 @@ export default function TerminalPage() {
           ))}
 
           {/* New terminal button */}
-          {vmStatus.connected && currentVault && (
+          {vmStatus.connected && (
             <button
               onClick={createTerminal}
               className="p-2 text-gray-400 hover:text-white hover:bg-specter-light/50 rounded-lg transition-colors"
@@ -224,6 +269,18 @@ export default function TerminalPage() {
         </div>
       </div>
 
+      {/* Error banner */}
+      {error && (
+        <div className="px-4 py-2 bg-red-900/30 border-b border-red-700 text-red-400 text-sm flex items-center justify-between">
+          <span>{error}</span>
+          <button onClick={() => setError(null)} className="text-red-400 hover:text-white">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      )}
+
       {/* Terminal content */}
       <div className="flex-1 relative">
         {!vmStatus.connected ? (
@@ -245,18 +302,6 @@ export default function TerminalPage() {
               </button>
             </div>
           </div>
-        ) : !currentVault ? (
-          <div className="absolute inset-0 flex items-center justify-center bg-specter-darker">
-            <div className="text-center">
-              <div className="w-16 h-16 bg-specter-medium rounded-full flex items-center justify-center mx-auto mb-4">
-                <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
-                </svg>
-              </div>
-              <h3 className="text-lg font-medium text-white mb-2">No Vault Selected</h3>
-              <p className="text-gray-400">Select a vault from the dashboard to start a terminal session</p>
-            </div>
-          </div>
         ) : terminals.length === 0 ? (
           <div className="absolute inset-0 flex items-center justify-center bg-specter-darker">
             <div className="text-center">
@@ -276,7 +321,7 @@ export default function TerminalPage() {
             </div>
           </div>
         ) : (
-          <div ref={terminalContainerRef} className="absolute inset-0 terminal-container" />
+          <div ref={terminalContainerRef} className="absolute inset-0 terminal-container p-2" />
         )}
       </div>
 
@@ -288,8 +333,7 @@ export default function TerminalPage() {
             <button
               key={cmd}
               onClick={() => {
-                const term = terminals.find((t) => t.id === activeTerminal);
-                if (term) {
+                if (activeTerminal) {
                   window.specter.terminal.write(activeTerminal, cmd);
                 }
               }}

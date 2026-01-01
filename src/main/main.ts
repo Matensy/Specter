@@ -34,10 +34,17 @@ function createWindow(): void {
   // Load the app
   if (isDev) {
     mainWindow.loadURL('http://localhost:5173');
-    mainWindow.webContents.openDevTools();
+    // DevTools: Press F12 or Ctrl+Shift+I to open manually
   } else {
     mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
   }
+
+  // Add keyboard shortcut for DevTools (F12)
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (input.key === 'F12') {
+      mainWindow?.webContents.toggleDevTools();
+    }
+  });
 
   // Window controls
   ipcMain.on('window:minimize', () => mainWindow?.minimize());
