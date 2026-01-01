@@ -1,0 +1,44 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+release/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Specter data (local vaults should not be committed)
+vaults/
+*.vault
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Credentials (never commit)
+credentials/
+*.pem
+*.key
+
+# Temp files
+tmp/
+temp/
+*.tmp
