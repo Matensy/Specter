@@ -1,0 +1,209 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #12121a;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #3f3f5a;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #5a5a7a;
+}
+
+/* Base styles */
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+/* Custom selection */
+::selection {
+  background: rgba(124, 58, 237, 0.4);
+}
+
+/* Focus styles */
+*:focus {
+  outline: none;
+}
+
+*:focus-visible {
+  outline: 2px solid #7c3aed;
+  outline-offset: 2px;
+}
+
+/* Terminal styles */
+.terminal-container {
+  background: #0a0a0f;
+}
+
+.xterm {
+  padding: 8px;
+}
+
+.xterm-viewport {
+  overflow-y: auto !important;
+}
+
+/* Severity badges */
+.severity-critical {
+  @apply bg-red-900/50 text-red-400 border border-red-700;
+}
+
+.severity-high {
+  @apply bg-orange-900/50 text-orange-400 border border-orange-700;
+}
+
+.severity-medium {
+  @apply bg-yellow-900/50 text-yellow-400 border border-yellow-700;
+}
+
+.severity-low {
+  @apply bg-green-900/50 text-green-400 border border-green-700;
+}
+
+.severity-info {
+  @apply bg-blue-900/50 text-blue-400 border border-blue-700;
+}
+
+/* Status indicators */
+.status-indicator {
+  @apply w-2 h-2 rounded-full;
+}
+
+.status-connected {
+  @apply bg-green-500 shadow-lg shadow-green-500/50;
+}
+
+.status-disconnected {
+  @apply bg-red-500;
+}
+
+.status-connecting {
+  @apply bg-yellow-500 animate-pulse;
+}
+
+/* Card hover effects */
+.card-hover {
+  @apply transition-all duration-200;
+}
+
+.card-hover:hover {
+  @apply bg-specter-light/50 border-specter-accent/50;
+}
+
+/* Drag region for window */
+.drag-region {
+  -webkit-app-region: drag;
+}
+
+.no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* Attack path progress */
+.path-step {
+  @apply relative pl-8 pb-4 border-l-2 border-specter-light;
+}
+
+.path-step:last-child {
+  @apply border-l-transparent;
+}
+
+.path-step::before {
+  @apply absolute left-0 top-0 w-4 h-4 rounded-full bg-specter-medium border-2 border-specter-light -translate-x-1/2;
+  content: '';
+}
+
+.path-step.completed::before {
+  @apply bg-green-500 border-green-400;
+}
+
+.path-step.in-progress::before {
+  @apply bg-yellow-500 border-yellow-400 animate-pulse;
+}
+
+/* Animation utilities */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.2s ease-out;
+}
+
+.animate-slideIn {
+  animation: slideIn 0.3s ease-out;
+}
+
+/* Markdown content styling */
+.markdown-content h1 {
+  @apply text-2xl font-bold mb-4 text-white;
+}
+
+.markdown-content h2 {
+  @apply text-xl font-semibold mb-3 text-white;
+}
+
+.markdown-content h3 {
+  @apply text-lg font-medium mb-2 text-gray-200;
+}
+
+.markdown-content p {
+  @apply mb-4 text-gray-300;
+}
+
+.markdown-content ul {
+  @apply list-disc list-inside mb-4 text-gray-300;
+}
+
+.markdown-content ol {
+  @apply list-decimal list-inside mb-4 text-gray-300;
+}
+
+.markdown-content code {
+  @apply bg-specter-dark px-1.5 py-0.5 rounded text-sm font-mono text-purple-400;
+}
+
+.markdown-content pre {
+  @apply bg-specter-darker p-4 rounded-lg mb-4 overflow-x-auto;
+}
+
+.markdown-content pre code {
+  @apply bg-transparent p-0;
+}
+
+.markdown-content blockquote {
+  @apply border-l-4 border-specter-accent pl-4 italic text-gray-400 my-4;
+}
+
+.markdown-content table {
+  @apply w-full border-collapse mb-4;
+}
+
+.markdown-content th,
+.markdown-content td {
+  @apply border border-specter-light px-4 py-2 text-left;
+}
+
+.markdown-content th {
+  @apply bg-specter-medium font-semibold;
+}
