@@ -10,6 +10,8 @@ export interface ManagedTerminal {
   vaultId: string;
   inputBuffer: string;
   isAttached: boolean;
+  containerElement: HTMLDivElement | null;
+  wasOpened: boolean;
 }
 
 class TerminalManagerClass {
@@ -97,6 +99,8 @@ class TerminalManagerClass {
       vaultId,
       inputBuffer: '',
       isAttached: false,
+      containerElement: null,
+      wasOpened: false,
     };
 
     // Handle terminal input - captures both typed and pasted data
@@ -107,8 +111,18 @@ class TerminalManagerClass {
       // Check if it's Enter key (command submission)
       if (data === '\r' || data === '\n') {
         if (instance.inputBuffer.trim()) {
-          // Send command to main process for logging
-          window.specter.terminal.logCommand(terminalId, instance.inputBuffer.trim());
+          // Clean the command before logging - remove ANSI escape sequences
+          const cleanCommand = instance.inputBuffer
+            .replace(/\x1b\[[0-9;]*[A-Za-z]/g, '') // ANSI CSI sequences
+            .replace(/\x1b[OP][A-D]/g, '')         // Arrow keys (O sequences)
+            .replace(/\x1bO[A-Z]/g, '')            // Function keys
+            .replace(/[\x00-\x1f]/g, '')           // Control characters
+            .trim();
+
+          if (cleanCommand) {
+            // Send command to main process for logging
+            window.specter.terminal.logCommand(terminalId, cleanCommand);
+          }
           instance.inputBuffer = '';
         }
       } else if (data === '\x7f' || data === '\b') {
@@ -117,9 +131,13 @@ class TerminalManagerClass {
       } else if (data === '\x03') {
         // CTRL+C - clear buffer (SIGINT)
         instance.inputBuffer = '';
+      } else if (data.startsWith('\x1b')) {
+        // Escape sequences (arrows, function keys, etc.) - don't add to buffer
+        // Just send to PTY without buffering
       } else if (data.charCodeAt(0) >= 32 || data.length > 1) {
-        // Regular characters or pasted text
-        instance.inputBuffer += data;
+        // Regular characters or pasted text (filter out non-printable)
+        const printable = data.replace(/[\x00-\x1f\x7f]/g, '');
+        instance.inputBuffer += printable;
       }
 
       // Send to PTY
@@ -196,14 +214,32 @@ class TerminalManagerClass {
     // Clear container
     container.innerHTML = '';
 
-    // Open terminal in container
-    term.terminal.open(container);
+    if (!term.wasOpened) {
+      // First time opening - create a wrapper div
+      const wrapper = document.createElement('div');
+      wrapper.style.width = '100%';
+      wrapper.style.height = '100%';
+      container.appendChild(wrapper);
+
+      // Open terminal in wrapper
+      term.terminal.open(wrapper);
+      term.containerElement = wrapper;
+      term.wasOpened = true;
+    } else if (term.containerElement) {
+      // Re-attach existing element
+      container.appendChild(term.containerElement);
+    }
+
     term.isAttached = true;
 
     // Fit after a short delay
     setTimeout(() => {
-      term.fitAddon.fit();
-      term.terminal.focus();
+      try {
+        term.fitAddon.fit();
+        term.terminal.focus();
+      } catch (e) {
+        // Ignore fit errors
+      }
     }, 50);
 
     return true;
@@ -213,7 +249,10 @@ class TerminalManagerClass {
     const term = this.terminals.get(terminalId);
     if (term) {
       term.isAttached = false;
-      // Don't dispose - just mark as detached
+      // Keep containerElement but detach from parent
+      if (term.containerElement && term.containerElement.parentElement) {
+        term.containerElement.parentElement.removeChild(term.containerElement);
+      }
     }
   }
 
