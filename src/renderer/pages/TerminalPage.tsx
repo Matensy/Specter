@@ -110,14 +110,19 @@ export default function TerminalPage() {
     setError(null);
     const vaultId = currentVault?.id || 'global';
 
-    const managedTerminal = await TerminalManager.createTerminal(vaultId);
-    if (!managedTerminal) {
-      setError('Failed to create terminal');
-      return;
-    }
+    try {
+      const managedTerminal = await TerminalManager.createTerminal(vaultId);
+      if (!managedTerminal) {
+        setError('Failed to create terminal - check console for details');
+        return;
+      }
 
-    setTerminals(TerminalManager.getAllTerminals());
-    setActiveTerminal(managedTerminal.id);
+      setTerminals(TerminalManager.getAllTerminals());
+      setActiveTerminal(managedTerminal.id);
+    } catch (err) {
+      console.error('Terminal creation error:', err);
+      setError(`Error: ${(err as Error).message}`);
+    }
   }, [vmStatus.connected, currentVault?.id]);
 
   const closeTerminal = useCallback((id: string) => {

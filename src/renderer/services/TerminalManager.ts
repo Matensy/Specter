@@ -45,11 +45,16 @@ class TerminalManagerClass {
   }
 
   async createTerminal(vaultId: string): Promise<ManagedTerminal | null> {
-    const result = await window.specter.terminal.create(vaultId);
-    if (!result.success || !result.terminalId) {
-      console.error('Failed to create terminal:', result.error);
-      return null;
-    }
+    console.log('TerminalManager: Creating terminal for vault:', vaultId);
+
+    try {
+      const result = await window.specter.terminal.create(vaultId);
+      console.log('TerminalManager: Create result:', result);
+
+      if (!result.success || !result.terminalId) {
+        console.error('Failed to create terminal:', result.error || 'Unknown error');
+        return null;
+      }
 
     const terminal = new Terminal({
       theme: {
@@ -204,7 +209,12 @@ class TerminalManagerClass {
     });
 
     this.terminals.set(terminalId, managedTerminal);
+    console.log('TerminalManager: Terminal created successfully:', terminalId);
     return managedTerminal;
+    } catch (err) {
+      console.error('TerminalManager: Error creating terminal:', err);
+      return null;
+    }
   }
 
   attachToContainer(terminalId: string, container: HTMLElement): boolean {
