@@ -101,6 +101,117 @@ export interface SpecterAPI {
     getConfig: () => Promise<unknown>;
     setConfig: (config: unknown) => Promise<{ success: boolean }>;
   };
+  machines: {
+    list: () => Promise<Machine[]>;
+    get: (id: string) => Promise<Machine | null>;
+    create: (data: MachineCreate) => Promise<{ success: boolean; id?: string }>;
+    update: (id: string, data: Partial<MachineCreate>) => Promise<{ success: boolean }>;
+    delete: (id: string) => Promise<{ success: boolean }>;
+    connect: (id: string) => Promise<{ success: boolean; error?: string }>;
+    disconnect: (id: string) => Promise<{ success: boolean }>;
+    test: (data: MachineTest) => Promise<{ success: boolean; error?: string }>;
+    getDefault: () => Promise<Machine | null>;
+    setDefault: (id: string) => Promise<{ success: boolean }>;
+    onStatusChange: (callback: (machineId: string, status: string) => void) => void;
+  };
+  analysis: {
+    analyze: (targetId: string, output: string) => Promise<{
+      success: boolean;
+      services?: DetectedService[];
+      recommendations?: Recommendation[];
+      pathProgress?: PathProgress[];
+      error?: string;
+    }>;
+    getRecommendations: (targetId: string) => Promise<{
+      success: boolean;
+      recommendations?: Recommendation[];
+      error?: string;
+    }>;
+    getServices: (targetId: string) => Promise<{
+      success: boolean;
+      services?: DetectedService[];
+      error?: string;
+    }>;
+    getPathProgress: (targetId: string) => Promise<{
+      success: boolean;
+      progress?: PathProgress[];
+      error?: string;
+    }>;
+    updatePath: (targetId: string, pathId: string, status: string) => Promise<{ success: boolean }>;
+    getPaths: () => Promise<{
+      success: boolean;
+      paths?: AttackPath[];
+    }>;
+    onResult: (callback: (data: unknown) => void) => void;
+  };
+}
+
+export interface Machine {
+  id: string;
+  name: string;
+  type: 'ssh' | 'local' | 'docker';
+  host?: string;
+  port: number;
+  username?: string;
+  is_default: number;
+  status: 'online' | 'offline' | 'connecting';
+  last_connected?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MachineCreate {
+  name: string;
+  type: 'ssh' | 'local' | 'docker';
+  host?: string;
+  port?: number;
+  username?: string;
+  password?: string;
+  privateKeyPath?: string;
+  isDefault?: boolean;
+}
+
+export interface MachineTest {
+  host: string;
+  port: number;
+  username: string;
+  password?: string;
+  privateKeyPath?: string;
+}
+
+export interface DetectedService {
+  name: string;
+  port?: number;
+  version?: string;
+  confidence: number;
+}
+
+export interface Recommendation {
+  service: string;
+  category: string;
+  commands: string[];
+  description: string;
+}
+
+export interface PathProgress {
+  id: string;
+  target_id: string;
+  path_id: string;
+  step_id: string;
+  status: string;
+  notes?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AttackPath {
+  id: string;
+  name: string;
+  stages: {
+    id: string;
+    name: string;
+    description: string;
+  }[];
 }
 
 declare global {

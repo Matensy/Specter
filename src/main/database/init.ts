@@ -318,6 +318,24 @@ export async function initializeDatabase(): Promise<void> {
       is_custom INTEGER DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- Machines table (VMs, SSH hosts, local)
+    CREATE TABLE IF NOT EXISTS machines (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL DEFAULT 'ssh',
+      host TEXT,
+      port INTEGER DEFAULT 22,
+      username TEXT,
+      password_encrypted TEXT,
+      private_key_path TEXT,
+      is_default INTEGER DEFAULT 0,
+      status TEXT DEFAULT 'offline',
+      last_connected DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      metadata TEXT
     )
   `);
 
@@ -331,6 +349,7 @@ export async function initializeDatabase(): Promise<void> {
   db.run(`CREATE INDEX IF NOT EXISTS idx_credentials_vault ON credentials(vault_id)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_pocs_target ON pocs(target_id)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_attack_progress_target ON attack_path_progress(target_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_machines_status ON machines(status)`);
 
   // Seed knowledge base
   await seedKnowledgeBase();

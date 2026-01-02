@@ -5,6 +5,8 @@ import { setupVMHandlers } from './handlers/vm.handler';
 import { setupTerminalHandlers } from './handlers/terminal.handler';
 import { setupDatabaseHandlers } from './handlers/database.handler';
 import { setupFileHandlers } from './handlers/file.handler';
+import { setupMachinesHandlers } from './handlers/machines.handler';
+import { setupAnalysisHandlers } from './handlers/analysis.handler';
 import { initializeDatabase } from './database/init';
 import { SpecterConfig } from './config';
 
@@ -82,6 +84,8 @@ app.whenReady().then(async () => {
   setupTerminalHandlers();
   setupDatabaseHandlers();
   setupFileHandlers();
+  setupMachinesHandlers();
+  setupAnalysisHandlers();
 
   createWindow();
 
