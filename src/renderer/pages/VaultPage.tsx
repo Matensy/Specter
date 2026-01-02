@@ -15,8 +15,11 @@ interface TimelineEvent {
 export default function VaultPage() {
   const { vaultId } = useParams<{ vaultId: string }>();
   const navigate = useNavigate();
-  const { currentVault, selectVault, targets, openVaultFolder, exportVault, createTarget } = useVault();
+  const { currentVault, selectVault, targets, openVaultFolder, exportVault, createTarget, updateVault, deleteVault } = useVault();
   const [showAddTarget, setShowAddTarget] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [editForm, setEditForm] = useState({ name: '', description: '', scope: '' });
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
   const [newTarget, setNewTarget] = useState({
     name: '',
@@ -34,6 +37,16 @@ export default function VaultPage() {
       });
     }
   }, [vaultId, selectVault]);
+
+  useEffect(() => {
+    if (currentVault) {
+      setEditForm({
+        name: currentVault.name,
+        description: currentVault.description || '',
+        scope: currentVault.scope || '',
+      });
+    }
+  }, [currentVault]);
 
   const loadTimeline = async () => {
     if (vaultId) {
@@ -67,6 +80,24 @@ export default function VaultPage() {
     if (result.path) {
       // Show success notification
     }
+  };
+
+  const handleEditVault = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!vaultId || !editForm.name.trim()) return;
+
+    await updateVault(vaultId, {
+      name: editForm.name.trim(),
+      description: editForm.description.trim(),
+      scope: editForm.scope.trim(),
+    });
+    setShowEditModal(false);
+  };
+
+  const handleDeleteVault = async (permanent: boolean) => {
+    if (!vaultId) return;
+    await deleteVault(vaultId);
+    navigate('/');
   };
 
   if (!currentVault) {
@@ -118,6 +149,15 @@ export default function VaultPage() {
 
         <div className="flex items-center gap-2">
           <button
+            onClick={() => setShowEditModal(true)}
+            className="p-2 text-gray-400 hover:text-white hover:bg-specter-light rounded-lg transition-colors"
+            title="Edit vault"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+            </svg>
+          </button>
+          <button
             onClick={() => openVaultFolder(currentVault.id)}
             className="p-2 text-gray-400 hover:text-white hover:bg-specter-light rounded-lg transition-colors"
             title="Open folder"
@@ -147,6 +187,15 @@ export default function VaultPage() {
               </button>
             </div>
           </div>
+          <button
+            onClick={() => setShowDeleteConfirm(true)}
+            className="p-2 text-red-400 hover:text-red-300 hover:bg-red-900/30 rounded-lg transition-colors"
+            title="Delete vault"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+          </button>
         </div>
       </div>
 
@@ -337,6 +386,96 @@ export default function VaultPage() {
           </div>
         </div>
       </div>
+
+      {/* Edit Modal */}
+      {showEditModal && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+          <div className="bg-specter-medium rounded-xl w-full max-w-lg border border-specter-light">
+            <div className="flex items-center justify-between p-4 border-b border-specter-light">
+              <h3 className="text-lg font-semibold text-white">Edit Vault</h3>
+              <button onClick={() => setShowEditModal(false)} className="p-1 text-gray-400 hover:text-white">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <form onSubmit={handleEditVault} className="p-4 space-y-4">
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Name *</label>
+                <input
+                  type="text"
+                  value={editForm.name}
+                  onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                  className="w-full px-3 py-2 bg-specter-dark border border-specter-light rounded-lg text-white"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Description</label>
+                <textarea
+                  value={editForm.description}
+                  onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
+                  className="w-full px-3 py-2 bg-specter-dark border border-specter-light rounded-lg text-white resize-none"
+                  rows={3}
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Scope</label>
+                <textarea
+                  value={editForm.scope}
+                  onChange={(e) => setEditForm({ ...editForm, scope: e.target.value })}
+                  className="w-full px-3 py-2 bg-specter-dark border border-specter-light rounded-lg text-white font-mono text-sm resize-none"
+                  rows={4}
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button type="button" onClick={() => setShowEditModal(false)} className="px-4 py-2 text-gray-400 hover:text-white">
+                  Cancel
+                </button>
+                <button type="submit" className="px-4 py-2 bg-specter-accent hover:bg-specter-accent-hover text-white rounded-lg">
+                  Save Changes
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+          <div className="bg-specter-medium rounded-xl w-full max-w-md border border-specter-light p-6">
+            <div className="flex items-center gap-4 mb-4">
+              <div className="w-12 h-12 bg-red-900/30 rounded-full flex items-center justify-center">
+                <svg className="w-6 h-6 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-white">Delete Vault</h3>
+                <p className="text-sm text-gray-400">This action cannot be undone</p>
+              </div>
+            </div>
+            <p className="text-gray-300 mb-6">
+              Are you sure you want to delete <strong>"{currentVault.name}"</strong>? All targets, findings, and data will be permanently removed.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
+                className="px-4 py-2 text-gray-400 hover:text-white"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleDeleteVault(true)}
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg"
+              >
+                Delete Permanently
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
