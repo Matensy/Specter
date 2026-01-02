@@ -1,51 +1,55 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { Terminal } from '@xterm/xterm';
-import { FitAddon } from '@xterm/addon-fit';
-import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
 import { useVM } from '../contexts/VMContext';
 import { useVault } from '../contexts/VaultContext';
-
-interface TerminalInstance {
-  id: string;
-  name: string;
-  terminal: Terminal;
-  fitAddon: FitAddon;
-}
+import { TerminalManager, ManagedTerminal } from '../services/TerminalManager';
 
 export default function TerminalPage() {
   const terminalContainerRef = useRef<HTMLDivElement>(null);
-  const terminalsRef = useRef<Map<string, TerminalInstance>>(new Map());
-  const listenersSetupRef = useRef(false);
+  const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const { status: vmStatus, connect } = useVM();
   const { currentVault } = useVault();
-  const [terminalIds, setTerminalIds] = useState<string[]>([]);
+  const [terminals, setTerminals] = useState<ManagedTerminal[]>([]);
   const [activeTerminal, setActiveTerminal] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Setup IPC listeners only once
+  // Load existing terminals on mount
   useEffect(() => {
-    if (listenersSetupRef.current) return;
-    listenersSetupRef.current = true;
-
-    window.specter.terminal.onData((terminalId: string, data: string) => {
-      const term = terminalsRef.current.get(terminalId);
-      if (term) {
-        term.terminal.write(data);
-      }
-    });
-
-    window.specter.terminal.onExit((terminalId: string) => {
-      const term = terminalsRef.current.get(terminalId);
-      if (term) {
-        term.terminal.dispose();
-        terminalsRef.current.delete(terminalId);
-        setTerminalIds(prev => prev.filter(id => id !== terminalId));
-        setActiveTerminal(prev => prev === terminalId ? null : prev);
-      }
-    });
+    const existingTerminals = TerminalManager.getAllTerminals();
+    setTerminals(existingTerminals);
+    if (existingTerminals.length > 0 && !activeTerminal) {
+      setActiveTerminal(existingTerminals[0].id);
+    }
   }, []);
+
+  // Attach active terminal to container
+  useEffect(() => {
+    if (!terminalContainerRef.current || !activeTerminal) return;
+
+    // Cleanup previous resize observer
+    if (resizeObserverRef.current) {
+      resizeObserverRef.current.disconnect();
+    }
+
+    // Attach terminal to container
+    TerminalManager.attachToContainer(activeTerminal, terminalContainerRef.current);
+
+    // Setup resize observer
+    resizeObserverRef.current = new ResizeObserver(() => {
+      TerminalManager.fit(activeTerminal);
+    });
+
+    resizeObserverRef.current.observe(terminalContainerRef.current);
+
+    return () => {
+      if (resizeObserverRef.current) {
+        resizeObserverRef.current.disconnect();
+      }
+      // Detach but don't destroy
+      TerminalManager.detachFromContainer(activeTerminal);
+    };
+  }, [activeTerminal]);
 
   const createTerminal = useCallback(async () => {
     if (!vmStatus.connected) {
@@ -54,128 +58,27 @@ export default function TerminalPage() {
     }
 
     setError(null);
-
-    // Use vault ID or 'global' for terminals without vault
     const vaultId = currentVault?.id || 'global';
 
-    const result = await window.specter.terminal.create(vaultId);
-    if (!result.success || !result.terminalId) {
-      setError(result.error || 'Failed to create terminal');
-      console.error('Failed to create terminal:', result.error);
+    const managedTerminal = await TerminalManager.createTerminal(vaultId);
+    if (!managedTerminal) {
+      setError('Failed to create terminal');
       return;
     }
 
-    const terminal = new Terminal({
-      theme: {
-        background: '#0a0a0f',
-        foreground: '#e4e4e7',
-        cursor: '#7c3aed',
-        cursorAccent: '#0a0a0f',
-        selectionBackground: 'rgba(124, 58, 237, 0.4)',
-        black: '#18181b',
-        red: '#ef4444',
-        green: '#22c55e',
-        yellow: '#eab308',
-        blue: '#3b82f6',
-        magenta: '#a855f7',
-        cyan: '#06b6d4',
-        white: '#f4f4f5',
-        brightBlack: '#3f3f46',
-        brightRed: '#f87171',
-        brightGreen: '#4ade80',
-        brightYellow: '#facc15',
-        brightBlue: '#60a5fa',
-        brightMagenta: '#c084fc',
-        brightCyan: '#22d3ee',
-        brightWhite: '#ffffff',
-      },
-      fontFamily: 'JetBrains Mono, Consolas, monospace',
-      fontSize: 14,
-      lineHeight: 1.2,
-      cursorBlink: true,
-      cursorStyle: 'bar',
-      scrollback: 10000,
-    });
-
-    const fitAddon = new FitAddon();
-    const webLinksAddon = new WebLinksAddon();
-
-    terminal.loadAddon(fitAddon);
-    terminal.loadAddon(webLinksAddon);
-
-    const terminalInstance: TerminalInstance = {
-      id: result.terminalId,
-      name: `Terminal ${terminalsRef.current.size + 1}`,
-      terminal,
-      fitAddon,
-    };
-
-    // Handle terminal input
-    terminal.onData((data) => {
-      window.specter.terminal.write(result.terminalId!, data);
-    });
-
-    // Handle terminal resize
-    terminal.onResize(({ cols, rows }) => {
-      window.specter.terminal.resize(result.terminalId!, cols, rows);
-    });
-
-    terminalsRef.current.set(result.terminalId, terminalInstance);
-    setTerminalIds(prev => [...prev, result.terminalId!]);
-    setActiveTerminal(result.terminalId);
+    setTerminals(TerminalManager.getAllTerminals());
+    setActiveTerminal(managedTerminal.id);
   }, [vmStatus.connected, currentVault?.id]);
 
-  // Attach terminal to DOM when active changes
-  useEffect(() => {
-    if (!terminalContainerRef.current || !activeTerminal) return;
-
-    const term = terminalsRef.current.get(activeTerminal);
-    if (!term) return;
-
-    // Clear container
-    terminalContainerRef.current.innerHTML = '';
-
-    // Open terminal
-    term.terminal.open(terminalContainerRef.current);
-
-    // Delay fit to ensure container is rendered
-    setTimeout(() => {
-      term.fitAddon.fit();
-      term.terminal.focus();
-    }, 50);
-
-    // Resize observer
-    const resizeObserver = new ResizeObserver(() => {
-      try {
-        term.fitAddon.fit();
-      } catch (e) {
-        // Ignore resize errors
-      }
-    });
-
-    resizeObserver.observe(terminalContainerRef.current);
-
-    return () => {
-      resizeObserver.disconnect();
-    };
-  }, [activeTerminal]);
-
   const closeTerminal = useCallback((id: string) => {
-    window.specter.terminal.close(id);
-    const term = terminalsRef.current.get(id);
-    if (term) {
-      term.terminal.dispose();
-      terminalsRef.current.delete(id);
+    TerminalManager.closeTerminal(id);
+    setTerminals(TerminalManager.getAllTerminals());
+
+    if (activeTerminal === id) {
+      const remaining = TerminalManager.getTerminalIds();
+      setActiveTerminal(remaining[0] || null);
     }
-    setTerminalIds(prev => prev.filter(tid => tid !== id));
-    setActiveTerminal(prev => {
-      if (prev === id) {
-        const remaining = Array.from(terminalsRef.current.keys());
-        return remaining[0] || null;
-      }
-      return prev;
-    });
-  }, []);
+  }, [activeTerminal]);
 
   const handleConnect = async () => {
     setConnecting(true);
@@ -191,15 +94,6 @@ export default function TerminalPage() {
       setConnecting(false);
     }
   };
-
-  const getTerminalsList = () => {
-    return terminalIds.map(id => {
-      const term = terminalsRef.current.get(id);
-      return term ? { id: term.id, name: term.name } : null;
-    }).filter(Boolean) as { id: string; name: string }[];
-  };
-
-  const terminals = getTerminalsList();
 
   return (
     <div className="h-full flex flex-col">
@@ -334,6 +228,10 @@ export default function TerminalPage() {
               key={cmd}
               onClick={() => {
                 if (activeTerminal) {
+                  const term = TerminalManager.getTerminal(activeTerminal);
+                  if (term) {
+                    term.inputBuffer += cmd;
+                  }
                   window.specter.terminal.write(activeTerminal, cmd);
                 }
               }}

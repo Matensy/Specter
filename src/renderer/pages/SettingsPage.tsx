@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useVM } from '../contexts/VMContext';
 
-interface VMConfig {
+interface VMConfigState {
   host: string;
   port: number;
   username: string;
@@ -12,16 +12,16 @@ interface VMConfig {
 
 interface AppConfig {
   vaultsDirectory: string;
-  vm: VMConfig;
+  vm: VMConfigState;
   theme: string;
   language: string;
   autoSaveInterval: number;
 }
 
 export default function SettingsPage() {
-  const { status: vmStatus, connect, disconnect, testConnection, configure } = useVM();
+  const { status: vmStatus, config: savedConfig, connect, disconnect, testConnection, configure } = useVM();
   const [config, setConfig] = useState<AppConfig | null>(null);
-  const [vmConfig, setVmConfig] = useState<VMConfig>({
+  const [vmConfig, setVmConfig] = useState<VMConfigState>({
     host: '127.0.0.1',
     port: 22,
     username: 'kali',
@@ -37,11 +37,30 @@ export default function SettingsPage() {
     loadConfig();
   }, []);
 
+  // Update local state when saved config changes
+  useEffect(() => {
+    if (savedConfig) {
+      setVmConfig(prev => ({
+        ...prev,
+        host: savedConfig.host || prev.host,
+        port: savedConfig.port || prev.port,
+        username: savedConfig.username || prev.username,
+        privateKeyPath: savedConfig.privateKeyPath || prev.privateKeyPath,
+        autoStart: savedConfig.autoStart || false,
+        // Keep password empty for security
+      }));
+    }
+  }, [savedConfig]);
+
   const loadConfig = async () => {
     const appConfig = await window.specter.app.getConfig();
     setConfig(appConfig as AppConfig);
     if (appConfig?.vm) {
-      setVmConfig({ ...vmConfig, ...appConfig.vm, password: '' });
+      setVmConfig(prev => ({
+        ...prev,
+        ...appConfig.vm,
+        password: '', // Don't show saved password
+      }));
     }
   };
 
@@ -168,6 +187,18 @@ export default function SettingsPage() {
                 Browse
               </button>
             </div>
+          </div>
+
+          <div className="col-span-2">
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={vmConfig.autoStart}
+                onChange={(e) => setVmConfig({ ...vmConfig, autoStart: e.target.checked })}
+                className="w-4 h-4 rounded border-specter-light bg-specter-dark text-specter-accent focus:ring-specter-accent"
+              />
+              <span className="text-sm text-gray-400">Auto-connect on startup</span>
+            </label>
           </div>
         </div>
 

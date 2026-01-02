@@ -9,7 +9,7 @@ export interface SpecterAPI {
     list: () => Promise<unknown[]>;
     get: (id: string) => Promise<unknown>;
     update: (id: string, data: unknown) => Promise<{ success: boolean }>;
-    delete: (id: string) => Promise<{ success: boolean }>;
+    delete: (id: string, permanent?: boolean) => Promise<{ success: boolean; permanent?: boolean }>;
     open: (id: string) => Promise<{ success: boolean }>;
     export: (id: string, format: string) => Promise<{ success: boolean; path?: string }>;
   };
@@ -28,6 +28,7 @@ export interface SpecterAPI {
     write: (terminalId: string, data: string) => Promise<{ success: boolean }>;
     resize: (terminalId: string, cols: number, rows: number) => Promise<{ success: boolean }>;
     close: (terminalId: string) => Promise<{ success: boolean }>;
+    logCommand: (terminalId: string, command: string) => Promise<{ success: boolean }>;
     onData: (callback: (terminalId: string, data: string) => void) => void;
     onExit: (callback: (terminalId: string) => void) => void;
   };

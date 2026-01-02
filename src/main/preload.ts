@@ -15,7 +15,7 @@ contextBridge.exposeInMainWorld('specter', {
     list: () => ipcRenderer.invoke('vault:list'),
     get: (id: string) => ipcRenderer.invoke('vault:get', id),
     update: (id: string, data: unknown) => ipcRenderer.invoke('vault:update', id, data),
-    delete: (id: string) => ipcRenderer.invoke('vault:delete', id),
+    delete: (id: string, permanent: boolean = false) => ipcRenderer.invoke('vault:delete', id, permanent),
     open: (id: string) => ipcRenderer.invoke('vault:open', id),
     export: (id: string, format: string) => ipcRenderer.invoke('vault:export', id, format),
   },
@@ -41,6 +41,8 @@ contextBridge.exposeInMainWorld('specter', {
     resize: (terminalId: string, cols: number, rows: number) =>
       ipcRenderer.invoke('terminal:resize', terminalId, cols, rows),
     close: (terminalId: string) => ipcRenderer.invoke('terminal:close', terminalId),
+    logCommand: (terminalId: string, command: string) =>
+      ipcRenderer.invoke('terminal:logCommand', terminalId, command),
     onData: (callback: (terminalId: string, data: string) => void) => {
       ipcRenderer.on('terminal:data', (_, terminalId, data) => callback(terminalId, data));
     },

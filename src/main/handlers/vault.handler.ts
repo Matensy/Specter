@@ -201,15 +201,70 @@ Created: ${new Date().toISOString()}
     return { success: true };
   });
 
-  // Delete vault (soft delete)
-  ipcMain.handle('vault:delete', async (_, id: string) => {
-    const stmt = db.prepare(`
-      UPDATE vaults SET status = 'deleted', updated_at = CURRENT_TIMESTAMP WHERE id = ?
-    `);
+  // Delete vault (soft delete by default, hard delete with cascade if permanent=true)
+  ipcMain.handle('vault:delete', async (_, id: string, permanent: boolean = false) => {
+    if (permanent) {
+      // Hard delete with cascade
+      // Get vault path first to delete files
+      const vaultStmt = db.prepare('SELECT path FROM vaults WHERE id = ?');
+      const vault = vaultStmt.get(id) as { path: string } | undefined;
 
-    stmt.run(id);
+      // Delete all related data in order (respecting foreign keys)
+      // 1. Get all targets for this vault
+      const targets = db.prepare('SELECT id FROM targets WHERE vault_id = ?').all(id) as { id: string }[];
 
-    return { success: true };
+      for (const target of targets) {
+        // Delete evidence for each finding
+        const findings = db.prepare('SELECT id FROM findings WHERE target_id = ?').all(target.id) as { id: string }[];
+        for (const finding of findings) {
+          db.prepare('DELETE FROM evidence WHERE finding_id = ?').run(finding.id);
+        }
+
+        // Delete findings
+        db.prepare('DELETE FROM findings WHERE target_id = ?').run(target.id);
+
+        // Delete command logs
+        db.prepare('DELETE FROM command_logs WHERE target_id = ?').run(target.id);
+
+        // Delete POCs
+        db.prepare('DELETE FROM pocs WHERE target_id = ?').run(target.id);
+
+        // Delete attack path progress
+        db.prepare('DELETE FROM attack_path_progress WHERE target_id = ?').run(target.id);
+      }
+
+      // Delete targets
+      db.prepare('DELETE FROM targets WHERE vault_id = ?').run(id);
+
+      // Delete credentials
+      db.prepare('DELETE FROM credentials WHERE vault_id = ?').run(id);
+
+      // Delete timeline events
+      db.prepare('DELETE FROM timeline_events WHERE vault_id = ?').run(id);
+
+      // Delete vault
+      db.prepare('DELETE FROM vaults WHERE id = ?').run(id);
+
+      // Delete vault folder from disk
+      if (vault && vault.path && fs.existsSync(vault.path)) {
+        try {
+          fs.rmSync(vault.path, { recursive: true, force: true });
+        } catch (err) {
+          console.error('Failed to delete vault folder:', err);
+        }
+      }
+
+      return { success: true, permanent: true };
+    } else {
+      // Soft delete
+      const stmt = db.prepare(`
+        UPDATE vaults SET status = 'deleted', updated_at = CURRENT_TIMESTAMP WHERE id = ?
+      `);
+
+      stmt.run(id);
+
+      return { success: true, permanent: false };
+    }
   });
 
   // Open vault in file explorer
