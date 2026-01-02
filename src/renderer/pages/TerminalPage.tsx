@@ -3,55 +3,7 @@ import '@xterm/xterm/css/xterm.css';
 import { useVM } from '../contexts/VMContext';
 import { useVault } from '../contexts/VaultContext';
 import { TerminalManager, ManagedTerminal } from '../services/TerminalManager';
-
-interface QuickCommand {
-  label: string;
-  command: string;
-  description?: string;
-}
-
-// Recommendations based on detected commands/output
-const NEXT_STEP_RECOMMENDATIONS: Record<string, QuickCommand[]> = {
-  nmap: [
-    { label: 'gobuster dir', command: 'gobuster dir -u http://TARGET -w /usr/share/wordlists/dirb/common.txt', description: 'Enumerate directories' },
-    { label: 'nikto', command: 'nikto -h http://TARGET', description: 'Web vulnerability scan' },
-    { label: 'searchsploit', command: 'searchsploit ', description: 'Search for exploits' },
-    { label: 'nmap scripts', command: 'nmap -sC -sV -p- TARGET', description: 'Full port scan with scripts' },
-  ],
-  rustscan: [
-    { label: 'nmap detailed', command: 'nmap -sC -sV -p PORT TARGET', description: 'Detailed scan on found ports' },
-    { label: 'gobuster', command: 'gobuster dir -u http://TARGET -w /usr/share/wordlists/dirb/common.txt', description: 'Directory enumeration' },
-    { label: 'whatweb', command: 'whatweb http://TARGET', description: 'Web technology detection' },
-  ],
-  gobuster: [
-    { label: 'ffuf', command: 'ffuf -u http://TARGET/FUZZ -w /usr/share/wordlists/dirb/common.txt', description: 'Fuzz for more paths' },
-    { label: 'curl', command: 'curl -v http://TARGET/path', description: 'Inspect found paths' },
-    { label: 'sqlmap', command: 'sqlmap -u "http://TARGET/page?id=1"', description: 'Test for SQL injection' },
-    { label: 'nuclei', command: 'nuclei -u http://TARGET -t cves/', description: 'CVE scanning' },
-  ],
-  ffuf: [
-    { label: 'curl inspect', command: 'curl -v http://TARGET/path', description: 'Inspect results' },
-    { label: 'sqlmap', command: 'sqlmap -u "http://TARGET/page?id=1"', description: 'SQL injection test' },
-    { label: 'wfuzz', command: 'wfuzz -c -z file,/usr/share/wordlists/rockyou.txt http://TARGET/login', description: 'Brute force' },
-  ],
-  nikto: [
-    { label: 'searchsploit', command: 'searchsploit ', description: 'Search exploits for found vulns' },
-    { label: 'metasploit', command: 'msfconsole', description: 'Launch Metasploit' },
-    { label: 'curl test', command: 'curl -v http://TARGET/vuln-path', description: 'Test vulnerability' },
-  ],
-  sqlmap: [
-    { label: 'dump db', command: 'sqlmap -u "URL" --dbs', description: 'Enumerate databases' },
-    { label: 'dump tables', command: 'sqlmap -u "URL" -D db --tables', description: 'Enumerate tables' },
-    { label: 'os-shell', command: 'sqlmap -u "URL" --os-shell', description: 'Get OS shell' },
-  ],
-  default: [
-    { label: 'nmap -sV', command: 'nmap -sV ', description: 'Service version scan' },
-    { label: 'gobuster dir', command: 'gobuster dir -u http:// -w /usr/share/wordlists/dirb/common.txt', description: 'Directory enumeration' },
-    { label: 'ffuf -w', command: 'ffuf -u http://TARGET/FUZZ -w /usr/share/wordlists/dirb/common.txt', description: 'Web fuzzing' },
-    { label: 'sqlmap -u', command: 'sqlmap -u ', description: 'SQL injection test' },
-    { label: 'nikto -h', command: 'nikto -h ', description: 'Web vulnerability scan' },
-  ],
-};
+import { PentestContext, GeneratedCommand } from '../services/PentestContext';
 
 export default function TerminalPage() {
   const terminalContainerRef = useRef<HTMLDivElement>(null);
@@ -62,39 +14,55 @@ export default function TerminalPage() {
   const [activeTerminal, setActiveTerminal] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [quickCommands, setQuickCommands] = useState<QuickCommand[]>(NEXT_STEP_RECOMMENDATIONS.default);
+  const [quickCommands, setQuickCommands] = useState<GeneratedCommand[]>([]);
   const [lastDetectedTool, setLastDetectedTool] = useState<string>('');
+  const [showAllCommands, setShowAllCommands] = useState(false);
+  const [contextInfo, setContextInfo] = useState<{ target: string | null; portsCount: number }>({ target: null, portsCount: 0 });
 
-  // Detect tools from terminal output
-  const detectToolFromOutput = useCallback((data: string) => {
-    const toolPatterns = [
-      { pattern: /nmap.*scan report|Nmap done/i, tool: 'nmap' },
-      { pattern: /rustscan|Open.*PORT/i, tool: 'rustscan' },
-      { pattern: /gobuster|Gobuster.*v|Status:/i, tool: 'gobuster' },
-      { pattern: /ffuf|FUZZ|:: Progress/i, tool: 'ffuf' },
-      { pattern: /nikto.*scan|Nikto v/i, tool: 'nikto' },
-      { pattern: /sqlmap|injection/i, tool: 'sqlmap' },
-    ];
+  // Update commands from PentestContext
+  const updateCommands = useCallback(() => {
+    const commands = PentestContext.generateCommands();
+    setQuickCommands(commands.slice(0, showAllCommands ? 50 : 8));
+    setLastDetectedTool(PentestContext.getLastDetectedTool());
 
-    for (const { pattern, tool } of toolPatterns) {
-      if (pattern.test(data)) {
-        if (tool !== lastDetectedTool) {
-          setLastDetectedTool(tool);
-          setQuickCommands(NEXT_STEP_RECOMMENDATIONS[tool] || NEXT_STEP_RECOMMENDATIONS.default);
-        }
-        return;
-      }
-    }
-  }, [lastDetectedTool]);
+    const host = PentestContext.getCurrentHost();
+    setContextInfo({
+      target: PentestContext.getCurrentTarget(),
+      portsCount: host?.ports.filter(p => p.state === 'open').length || 0,
+    });
+  }, [showAllCommands]);
 
-  // Listen for terminal output to detect tools
+  // Subscribe to PentestContext changes
   useEffect(() => {
+    updateCommands();
+    const unsubscribe = PentestContext.subscribe(updateCommands);
+    return () => unsubscribe();
+  }, [updateCommands]);
+
+  // Listen for terminal output to analyze
+  useEffect(() => {
+    let outputBuffer = '';
+    let bufferTimeout: ReturnType<typeof setTimeout> | null = null;
+
     const handleTerminalData = (_terminalId: string, data: string) => {
-      detectToolFromOutput(data);
+      // Buffer output to avoid processing every single character
+      outputBuffer += data;
+
+      if (bufferTimeout) clearTimeout(bufferTimeout);
+      bufferTimeout = setTimeout(() => {
+        if (outputBuffer.length > 50) { // Only analyze meaningful output
+          PentestContext.analyzeOutput(outputBuffer);
+        }
+        outputBuffer = '';
+      }, 500);
     };
 
     window.specter.terminal.onData(handleTerminalData);
-  }, [detectToolFromOutput]);
+
+    return () => {
+      if (bufferTimeout) clearTimeout(bufferTimeout);
+    };
+  }, []);
 
   // Load existing terminals on mount
   useEffect(() => {
@@ -177,6 +145,32 @@ export default function TerminalPage() {
     }
   };
 
+  const executeCommand = (command: string) => {
+    if (activeTerminal) {
+      const term = TerminalManager.getTerminal(activeTerminal);
+      if (term) {
+        term.inputBuffer += command;
+      }
+      window.specter.terminal.write(activeTerminal, command);
+    }
+  };
+
+  const getCategoryColor = (category: string): string => {
+    const colors: Record<string, string> = {
+      'Reconnaissance': 'bg-blue-900/40 text-blue-300 border-blue-700',
+      'Web Enumeration': 'bg-green-900/40 text-green-300 border-green-700',
+      'Vulnerability Scan': 'bg-red-900/40 text-red-300 border-red-700',
+      'Brute Force': 'bg-orange-900/40 text-orange-300 border-orange-700',
+      'Exploit Research': 'bg-purple-900/40 text-purple-300 border-purple-700',
+      'SMB Enumeration': 'bg-yellow-900/40 text-yellow-300 border-yellow-700',
+      'SSH Enumeration': 'bg-cyan-900/40 text-cyan-300 border-cyan-700',
+      'Database Enumeration': 'bg-pink-900/40 text-pink-300 border-pink-700',
+      'AD Enumeration': 'bg-indigo-900/40 text-indigo-300 border-indigo-700',
+      'Manual Testing': 'bg-gray-800/40 text-gray-300 border-gray-600',
+    };
+    return colors[category] || 'bg-specter-medium text-gray-300 border-specter-light';
+  };
+
   return (
     <div className="h-full flex flex-col">
       {/* Toolbar */}
@@ -225,8 +219,17 @@ export default function TerminalPage() {
           )}
         </div>
 
-        {/* VM status */}
+        {/* Context info & VM status */}
         <div className="flex items-center gap-3">
+          {contextInfo.target && (
+            <div className="flex items-center gap-2 px-3 py-1 bg-specter-medium rounded-lg">
+              <span className="text-xs text-gray-400">Target:</span>
+              <span className="text-xs text-specter-accent font-mono">{contextInfo.target}</span>
+              {contextInfo.portsCount > 0 && (
+                <span className="text-xs text-green-400">({contextInfo.portsCount} ports)</span>
+              )}
+            </div>
+          )}
           {currentVault && (
             <span className="text-xs text-gray-500">
               Vault: {currentVault.name}
@@ -301,37 +304,56 @@ export default function TerminalPage() {
         )}
       </div>
 
-      {/* Quick commands bar - Dynamic based on detected tools */}
+      {/* Smart Commands Bar - Dynamic based on context */}
       {vmStatus.connected && activeTerminal && (
-        <div className="h-12 bg-specter-darker border-t border-specter-medium flex items-center px-4 gap-2 overflow-x-auto">
-          <div className="flex items-center gap-2 flex-shrink-0">
-            <span className="text-xs text-gray-500">Next:</span>
-            {lastDetectedTool && (
-              <span className="px-2 py-0.5 text-xs bg-specter-accent/20 text-specter-accent rounded">
-                after {lastDetectedTool}
-              </span>
-            )}
+        <div className="bg-specter-darker border-t border-specter-medium">
+          {/* Header */}
+          <div className="flex items-center justify-between px-4 py-2 border-b border-specter-medium/50">
+            <div className="flex items-center gap-3">
+              <span className="text-xs font-medium text-gray-400">Smart Commands</span>
+              {lastDetectedTool && (
+                <span className="px-2 py-0.5 text-xs bg-specter-accent/20 text-specter-accent rounded">
+                  detected: {lastDetectedTool}
+                </span>
+              )}
+              {contextInfo.portsCount > 0 && (
+                <span className="px-2 py-0.5 text-xs bg-green-900/30 text-green-400 rounded">
+                  {contextInfo.portsCount} services found
+                </span>
+              )}
+            </div>
+            <button
+              onClick={() => setShowAllCommands(!showAllCommands)}
+              className="text-xs text-gray-500 hover:text-white transition-colors"
+            >
+              {showAllCommands ? 'Show Less' : `Show All (${PentestContext.generateCommands().length})`}
+            </button>
           </div>
-          <div className="flex items-center gap-2">
-            {quickCommands.map((cmd) => (
-              <button
-                key={cmd.label}
-                onClick={() => {
-                  if (activeTerminal) {
-                    const term = TerminalManager.getTerminal(activeTerminal);
-                    if (term) {
-                      term.inputBuffer += cmd.command;
-                    }
-                    window.specter.terminal.write(activeTerminal, cmd.command);
-                  }
-                }}
-                className="px-2 py-1 text-xs bg-specter-medium hover:bg-specter-light text-gray-400 hover:text-white rounded transition-colors whitespace-nowrap flex-shrink-0"
-                title={cmd.description}
-              >
-                {cmd.label}
-              </button>
-            ))}
+
+          {/* Commands */}
+          <div className={`overflow-y-auto ${showAllCommands ? 'max-h-64' : 'max-h-24'} p-2`}>
+            <div className="flex flex-wrap gap-2">
+              {quickCommands.map((cmd) => (
+                <button
+                  key={cmd.id}
+                  onClick={() => executeCommand(cmd.command)}
+                  className={`px-3 py-1.5 text-xs rounded-lg border transition-all hover:scale-105 ${getCategoryColor(cmd.category)}`}
+                  title={`${cmd.description}\n\nCommand: ${cmd.command}`}
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium">{cmd.description.substring(0, 40)}{cmd.description.length > 40 ? '...' : ''}</span>
+                  </div>
+                </button>
+              ))}
+            </div>
           </div>
+
+          {/* Hint */}
+          {quickCommands.length === 0 && (
+            <div className="px-4 py-3 text-center text-gray-500 text-sm">
+              Run a scan (nmap, rustscan) to get intelligent command recommendations
+            </div>
+          )}
         </div>
       )}
     </div>
