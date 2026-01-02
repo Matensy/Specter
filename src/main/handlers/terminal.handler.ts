@@ -8,9 +8,19 @@ interface TerminalSession {
   id: string;
   vaultId: string;
   channel: ClientChannel | null;
-  buffer: string;
-  currentCommand: string;
+  outputBuffer: string;
+  pendingCommand: string | null;
   commandStartTime: number | null;
+}
+
+interface CommandLog {
+  terminalId: string;
+  vaultId: string;
+  command: string;
+  output: string;
+  startTime: number;
+  endTime: number;
+  type: 'input' | 'output' | 'error';
 }
 
 const terminals: Map<string, TerminalSession> = new Map();
@@ -56,32 +66,45 @@ export function setupTerminalHandlers(): void {
           id: terminalId,
           vaultId,
           channel,
-          buffer: '',
-          currentCommand: '',
+          outputBuffer: '',
+          pendingCommand: null,
           commandStartTime: null,
         };
 
         terminals.set(terminalId, session);
 
-        // Handle data from terminal
+        // Handle data from terminal (PTY output)
         channel.on('data', (data: Buffer) => {
           const text = data.toString('utf8');
-          session.buffer += text;
           broadcastData(terminalId, text);
 
-          // Try to detect command completion and log
-          processTerminalOutput(session, text);
+          // Capture output for pending command
+          if (session.pendingCommand) {
+            session.outputBuffer += text;
+            // Detect command completion (prompt returned)
+            if (detectPrompt(text)) {
+              logCommandComplete(session);
+            }
+          }
         });
 
         channel.on('close', () => {
+          // Log any pending command before closing
+          if (session.pendingCommand) {
+            logCommandComplete(session);
+          }
           terminals.delete(terminalId);
           broadcastExit(terminalId);
         });
 
         channel.stderr.on('data', (data: Buffer) => {
           const text = data.toString('utf8');
-          session.buffer += text;
           broadcastData(terminalId, text);
+
+          // Capture stderr for pending command
+          if (session.pendingCommand) {
+            session.outputBuffer += text;
+          }
         });
 
         resolve({ success: true, terminalId });
@@ -96,21 +119,27 @@ export function setupTerminalHandlers(): void {
       return { success: false, error: 'Terminal not found' };
     }
 
-    // Track command input
-    if (data.includes('\r') || data.includes('\n')) {
-      // Command was entered
-      if (session.currentCommand.trim()) {
-        session.commandStartTime = Date.now();
-      }
-    } else if (data.charCodeAt(0) >= 32) {
-      // Regular character input
-      session.currentCommand += data;
-    } else if (data.charCodeAt(0) === 127) {
-      // Backspace
-      session.currentCommand = session.currentCommand.slice(0, -1);
+    session.channel.write(data);
+    return { success: true };
+  });
+
+  // Log command from renderer (captures typed + pasted commands)
+  ipcMain.handle('terminal:logCommand', async (_, terminalId: string, command: string) => {
+    const session = terminals.get(terminalId);
+    if (!session) {
+      return { success: false, error: 'Terminal not found' };
     }
 
-    session.channel.write(data);
+    // If there was a pending command, log it first
+    if (session.pendingCommand) {
+      logCommandComplete(session);
+    }
+
+    // Start tracking new command
+    session.pendingCommand = command;
+    session.commandStartTime = Date.now();
+    session.outputBuffer = '';
+
     return { success: true };
   });
 
@@ -135,34 +164,42 @@ export function setupTerminalHandlers(): void {
     return { success: true };
   });
 
-  // Helper function to process terminal output and log commands
-  function processTerminalOutput(session: TerminalSession, text: string): void {
-    // Simple heuristic: if we see a prompt pattern, the previous command finished
+  // Detect if terminal output contains a prompt (command finished)
+  function detectPrompt(text: string): boolean {
     const promptPatterns = [
       /\$\s*$/,
       /#\s*$/,
       />\s*$/,
       /┌──\(/,
       /└─\$/,
+      /\]\$\s*$/,
+      /\]#\s*$/,
+      /@.*:\s*\$\s*$/,
+      /kali@/,
+      /root@/,
     ];
 
-    const hasPrompt = promptPatterns.some((pattern) => pattern.test(text));
-
-    if (hasPrompt && session.currentCommand.trim() && session.commandStartTime) {
-      const duration = Date.now() - session.commandStartTime;
-      const command = session.currentCommand.trim();
-
-      // Log the command
-      logCommand(session.vaultId, command, session.buffer, duration);
-
-      // Reset for next command
-      session.currentCommand = '';
-      session.commandStartTime = null;
-      session.buffer = '';
-    }
+    return promptPatterns.some((pattern) => pattern.test(text));
   }
 
-  function logCommand(vaultId: string, command: string, output: string, duration: number): void {
+  // Log completed command to database
+  function logCommandComplete(session: TerminalSession): void {
+    if (!session.pendingCommand || !session.commandStartTime) return;
+
+    const duration = Date.now() - session.commandStartTime;
+    const command = session.pendingCommand;
+    const output = session.outputBuffer;
+
+    // Log to database
+    logCommandToDb(session.vaultId, command, output, duration);
+
+    // Reset
+    session.pendingCommand = null;
+    session.commandStartTime = null;
+    session.outputBuffer = '';
+  }
+
+  function logCommandToDb(vaultId: string, command: string, output: string, duration: number): void {
     // Determine command category
     const category = categorizeCommand(command);
     const attackPath = detectAttackPath(command);

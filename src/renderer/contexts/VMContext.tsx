@@ -15,10 +15,12 @@ interface VMConfig {
   username: string;
   privateKeyPath?: string;
   password?: string;
+  autoStart?: boolean;
 }
 
 interface VMContextType {
   status: VMStatus;
+  config: VMConfig | null;
   connect: (config?: Partial<VMConfig>) => Promise<{ success: boolean; error?: string }>;
   disconnect: () => Promise<void>;
   testConnection: (config: Partial<VMConfig>) => Promise<{ success: boolean; error?: string }>;
@@ -32,10 +34,23 @@ export function VMProvider({ children }: { children: ReactNode }) {
     connected: false,
     connecting: false,
   });
+  const [config, setConfig] = useState<VMConfig | null>(null);
 
   useEffect(() => {
     // Get initial status
     window.specter.vm.getStatus().then(setStatus);
+
+    // Load saved config and try auto-connect
+    window.specter.app.getConfig().then((appConfig: any) => {
+      if (appConfig?.vm) {
+        setConfig(appConfig.vm);
+
+        // Auto-connect if configured
+        if (appConfig.vm.autoStart && !status.connected) {
+          window.specter.vm.connect();
+        }
+      }
+    });
 
     // Listen for status changes
     window.specter.vm.onStatusChange((newStatus) => {
@@ -62,7 +77,7 @@ export function VMProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <VMContext.Provider value={{ status, connect, disconnect, testConnection, configure }}>
+    <VMContext.Provider value={{ status, config, connect, disconnect, testConnection, configure }}>
       {children}
     </VMContext.Provider>
   );

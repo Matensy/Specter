@@ -6,6 +6,7 @@ import Dashboard from './pages/Dashboard';
 import VaultPage from './pages/VaultPage';
 import TargetPage from './pages/TargetPage';
 import TerminalPage from './pages/TerminalPage';
+import MachinesPage from './pages/MachinesPage';
 import AttackPathsPage from './pages/AttackPathsPage';
 import FindingsPage from './pages/FindingsPage';
 import POCBuilderPage from './pages/POCBuilderPage';
@@ -34,6 +35,7 @@ export default function App() {
                 <Route path="/vault/:vaultId" element={<VaultPage />} />
                 <Route path="/vault/:vaultId/target/:targetId" element={<TargetPage />} />
                 <Route path="/terminal" element={<TerminalPage />} />
+                <Route path="/machines" element={<MachinesPage />} />
                 <Route path="/attack-paths" element={<AttackPathsPage />} />
                 <Route path="/findings" element={<FindingsPage />} />
                 <Route path="/poc-builder" element={<POCBuilderPage />} />

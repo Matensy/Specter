@@ -15,7 +15,7 @@ contextBridge.exposeInMainWorld('specter', {
     list: () => ipcRenderer.invoke('vault:list'),
     get: (id: string) => ipcRenderer.invoke('vault:get', id),
     update: (id: string, data: unknown) => ipcRenderer.invoke('vault:update', id, data),
-    delete: (id: string) => ipcRenderer.invoke('vault:delete', id),
+    delete: (id: string, permanent: boolean = false) => ipcRenderer.invoke('vault:delete', id, permanent),
     open: (id: string) => ipcRenderer.invoke('vault:open', id),
     export: (id: string, format: string) => ipcRenderer.invoke('vault:export', id, format),
   },
@@ -41,6 +41,8 @@ contextBridge.exposeInMainWorld('specter', {
     resize: (terminalId: string, cols: number, rows: number) =>
       ipcRenderer.invoke('terminal:resize', terminalId, cols, rows),
     close: (terminalId: string) => ipcRenderer.invoke('terminal:close', terminalId),
+    logCommand: (terminalId: string, command: string) =>
+      ipcRenderer.invoke('terminal:logCommand', terminalId, command),
     onData: (callback: (terminalId: string, data: string) => void) => {
       ipcRenderer.on('terminal:data', (_, terminalId, data) => callback(terminalId, data));
     },
@@ -132,6 +134,37 @@ contextBridge.exposeInMainWorld('specter', {
     getVersion: () => ipcRenderer.invoke('app:version'),
     getConfig: () => ipcRenderer.invoke('app:config'),
     setConfig: (config: unknown) => ipcRenderer.invoke('app:setConfig', config),
+  },
+
+  // Machines operations
+  machines: {
+    list: () => ipcRenderer.invoke('machines:list'),
+    get: (id: string) => ipcRenderer.invoke('machines:get', id),
+    create: (data: unknown) => ipcRenderer.invoke('machines:create', data),
+    update: (id: string, data: unknown) => ipcRenderer.invoke('machines:update', id, data),
+    delete: (id: string) => ipcRenderer.invoke('machines:delete', id),
+    connect: (id: string) => ipcRenderer.invoke('machines:connect', id),
+    disconnect: (id: string) => ipcRenderer.invoke('machines:disconnect', id),
+    test: (data: unknown) => ipcRenderer.invoke('machines:test', data),
+    getDefault: () => ipcRenderer.invoke('machines:getDefault'),
+    setDefault: (id: string) => ipcRenderer.invoke('machines:setDefault', id),
+    onStatusChange: (callback: (machineId: string, status: string) => void) => {
+      ipcRenderer.on('machine:status-changed', (_, machineId, status) => callback(machineId, status));
+    },
+  },
+
+  // Analysis and recommendations
+  analysis: {
+    analyze: (targetId: string, output: string) => ipcRenderer.invoke('analysis:analyze', targetId, output),
+    getRecommendations: (targetId: string) => ipcRenderer.invoke('analysis:recommendations', targetId),
+    getServices: (targetId: string) => ipcRenderer.invoke('analysis:services', targetId),
+    getPathProgress: (targetId: string) => ipcRenderer.invoke('analysis:pathProgress', targetId),
+    updatePath: (targetId: string, pathId: string, status: string) =>
+      ipcRenderer.invoke('analysis:updatePath', targetId, pathId, status),
+    getPaths: () => ipcRenderer.invoke('analysis:paths'),
+    onResult: (callback: (data: unknown) => void) => {
+      ipcRenderer.on('analysis:result', (_, data) => callback(data));
+    },
   },
 });
 
